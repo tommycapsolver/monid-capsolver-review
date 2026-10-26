@@ -1,0 +1,867 @@
+From 58d4b53668f88c8d203b7c2e6a77b80be9ebc6fb Mon Sep 17 00:00:00 2001
+From: Tommy <tommy@capsolver.com>
+Date: Mon, 26 Oct 2026 16:28:42 +0800
+Subject: [PATCH] Add CapSolver connector review package
+
+---
+ CAPSOLVER_REVIEW.md                           |  16 ++
+ .../endpoints/recaptcha-v2/endpoint.ts        |  40 ++++
+ .../endpoints/recaptcha-v3/endpoint.ts        |  38 ++++
+ .../capsolver/endpoints/turnstile/endpoint.ts |  55 +++++
+ .../fixtures/synthetic-succeeded.json         |  52 +++++
+ connectors/capsolver/lifecycle.test.ts        |  45 ++++
+ connectors/capsolver/provider.ts              | 156 ++++++++++++++
+ connectors/capsolver/schema/common.ts         |  10 +
+ connectors/capsolver/test-inputs.json         |  22 ++
+ connectors/categories.ts                      |   6 +
+ connectors/ids.lock.json                      |   3 +
+ .../add-connector-capsolver/proposal.md       |  32 +++
+ .../specs/capsolver-connector/spec.md         |  36 ++++
+ .../changes/add-connector-capsolver/tasks.md  |  16 ++
+ ...captcha-solving-to-ai-agents-with-monid.md | 201 ++++++++++++++++++
+ 15 files changed, 728 insertions(+)
+ create mode 100644 CAPSOLVER_REVIEW.md
+ create mode 100644 connectors/capsolver/endpoints/recaptcha-v2/endpoint.ts
+ create mode 100644 connectors/capsolver/endpoints/recaptcha-v3/endpoint.ts
+ create mode 100644 connectors/capsolver/endpoints/turnstile/endpoint.ts
+ create mode 100644 connectors/capsolver/fixtures/synthetic-succeeded.json
+ create mode 100644 connectors/capsolver/lifecycle.test.ts
+ create mode 100644 connectors/capsolver/provider.ts
+ create mode 100644 connectors/capsolver/schema/common.ts
+ create mode 100644 connectors/capsolver/test-inputs.json
+ create mode 100644 openspec/changes/add-connector-capsolver/proposal.md
+ create mode 100644 openspec/changes/add-connector-capsolver/specs/capsolver-connector/spec.md
+ create mode 100644 openspec/changes/add-connector-capsolver/tasks.md
+ create mode 100644 review-materials/how-to-add-captcha-solving-to-ai-agents-with-monid.md
+
+diff --git a/CAPSOLVER_REVIEW.md b/CAPSOLVER_REVIEW.md
+new file mode 100644
+index 0000000..ef169da
+--- /dev/null
++++ b/CAPSOLVER_REVIEW.md
+@@ -0,0 +1,16 @@
++# Monid × CapSolver 内部审核
++
++## 背景
++
++Monid 是一个面向 AI Agent 的工具接入平台，并开放了 Connector 提交流程。我们先准备了一版 CapSolver Connector，以及一篇配套的集成文章。
++
++这份内容目前只用于内部审核，不代表已经获得 Monid 官方收录或上线。
++
++## 请研发协助检查
++
++1. Connector 是否能正常运行；
++2. 当前支持的三项能力是否合适；
++3. 参数、示例和说明是否准确；
++4. 如有问题，请直接修改或留下意见。
++
++研发确认后，运营再整理正式 PR，并推进 Monid 官方审核和后续文章发布。
+diff --git a/connectors/capsolver/endpoints/recaptcha-v2/endpoint.ts b/connectors/capsolver/endpoints/recaptcha-v2/endpoint.ts
+new file mode 100644
+index 0000000..fa33a39
+--- /dev/null
++++ b/connectors/capsolver/endpoints/recaptcha-v2/endpoint.ts
+@@ -0,0 +1,40 @@
++import { defineEndpoint, UsageModelKind } from "@shared/core";
++import { z } from "zod";
++import { zWebsite } from "../../schema/common.ts";
++
++const zBody = zWebsite.extend({
++    isInvisible: z.boolean().optional(),
++    pageAction: z.string().min(1).optional(),
++}).strict();
++
++export default defineEndpoint({
++    meta: {
++        displayName: "Solve reCAPTCHA v2",
++        summary: "Create and complete a proxyless reCAPTCHA v2 token task.",
++        description: "Submit a proxyless reCAPTCHA v2 challenge and poll " +
++            "CapSolver until a token is ready. Intended for authorized " +
++            "browser automation, QA, RPA, and public-data workflows.",
++        docsUrl: "https://docs.capsolver.com/en/guide/captcha/ReCaptchaV2/",
++        categories: ["captcha-solving"],
++    },
++    endpoint: "/solve/recaptcha-v2",
++    request: { method: "POST", path: "/createTask" },
++    input: {
++        schema: { body: zBody },
++        toRequest: ({ data, utils }) => ({
++            ...data.input,
++            body: {
++                task: utils.json.merge(data.input.body ?? {}, {
++                    type: "ReCaptchaV2TaskProxyLess",
++                }),
++            },
++        }),
++    },
++    usage: {
++        model: {
++            kind: UsageModelKind.PER_CALL,
++            label: "completed reCAPTCHA v2 task",
++            consumes: { credit: "default", amount: 0.0008 },
++        },
++    },
++});
+diff --git a/connectors/capsolver/endpoints/recaptcha-v3/endpoint.ts b/connectors/capsolver/endpoints/recaptcha-v3/endpoint.ts
+new file mode 100644
+index 0000000..5a822d2
+--- /dev/null
++++ b/connectors/capsolver/endpoints/recaptcha-v3/endpoint.ts
+@@ -0,0 +1,38 @@
++import { defineEndpoint, UsageModelKind } from "@shared/core";
++import { z } from "zod";
++import { zWebsite } from "../../schema/common.ts";
++
++const zBody = zWebsite.extend({
++    pageAction: z.string().min(1).optional(),
++}).strict();
++
++export default defineEndpoint({
++    meta: {
++        displayName: "Solve reCAPTCHA v3",
++        summary: "Create and complete a proxyless reCAPTCHA v3 token task.",
++        description: "Submit a proxyless reCAPTCHA v3 challenge with an " +
++            "optional action and score target, then poll until its token is ready.",
++        docsUrl: "https://docs.capsolver.com/en/guide/captcha/ReCaptchaV3/",
++        categories: ["captcha-solving"],
++    },
++    endpoint: "/solve/recaptcha-v3",
++    request: { method: "POST", path: "/createTask" },
++    input: {
++        schema: { body: zBody },
++        toRequest: ({ data, utils }) => ({
++            ...data.input,
++            body: {
++                task: utils.json.merge(data.input.body ?? {}, {
++                    type: "ReCaptchaV3TaskProxyLess",
++                }),
++            },
++        }),
++    },
++    usage: {
++        model: {
++            kind: UsageModelKind.PER_CALL,
++            label: "completed reCAPTCHA v3 task",
++            consumes: { credit: "default", amount: 0.001 },
++        },
++    },
++});
+diff --git a/connectors/capsolver/endpoints/turnstile/endpoint.ts b/connectors/capsolver/endpoints/turnstile/endpoint.ts
+new file mode 100644
+index 0000000..8f443ad
+--- /dev/null
++++ b/connectors/capsolver/endpoints/turnstile/endpoint.ts
+@@ -0,0 +1,55 @@
++import { defineEndpoint, UsageModelKind } from "@shared/core";
++import { z } from "zod";
++import { zWebsite } from "../../schema/common.ts";
++
++const zBody = zWebsite.extend({
++    action: z.string().min(1).optional(),
++    cdata: z.string().min(1).optional(),
++}).strict();
++
++export default defineEndpoint({
++    meta: {
++        displayName: "Solve Cloudflare Turnstile",
++        summary: "Create and complete a proxyless Turnstile token task.",
++        description: "Submit a proxyless Cloudflare Turnstile challenge " +
++            "and poll CapSolver until its token is ready.",
++        docsUrl:
++            "https://docs.capsolver.com/en/guide/captcha/CloudflareTurnstile/",
++        categories: ["captcha-solving"],
++    },
++    endpoint: "/solve/turnstile",
++    request: { method: "POST", path: "/createTask" },
++    input: {
++        schema: { body: zBody },
++        toRequest: ({ data, utils }) => {
++            const body = data.input.body ?? {};
++            const action = utils.json.optionalGet(body, "$.action");
++            const cdata = utils.json.optionalGet(body, "$.cdata");
++            const task = utils.json.merge(
++                utils.json.omit(body, ["action", "cdata"]),
++                {
++                    type: "AntiTurnstileTaskProxyLess",
++                    ...(typeof action === "string" || typeof cdata === "string"
++                        ? {
++                            metadata: {
++                                type: "turnstile",
++                                ...(typeof action === "string"
++                                    ? { action }
++                                    : {}),
++                                ...(typeof cdata === "string" ? { cdata } : {}),
++                            },
++                        }
++                        : {}),
++                },
++            );
++            return { ...data.input, body: { task } };
++        },
++    },
++    usage: {
++        model: {
++            kind: UsageModelKind.PER_CALL,
++            label: "completed Turnstile task",
++            consumes: { credit: "default", amount: 0.0012 },
++        },
++    },
++});
+diff --git a/connectors/capsolver/fixtures/synthetic-succeeded.json b/connectors/capsolver/fixtures/synthetic-succeeded.json
+new file mode 100644
+index 0000000..dfe42b6
+--- /dev/null
++++ b/connectors/capsolver/fixtures/synthetic-succeeded.json
+@@ -0,0 +1,52 @@
++{
++    "name": "synthetic-succeeded",
++    "description": "Synthetic CapSolver createTask -> processing -> ready chain. No real API key, token, or customer data.",
++    "calls": [
++        {
++            "req": {
++                "method": "POST",
++                "url": "{{request.url}}"
++            },
++            "res": {
++                "status": 200,
++                "body": {
++                    "errorId": 0,
++                    "errorCode": "",
++                    "errorDescription": "",
++                    "taskId": "synthetic-task-id"
++                }
++            }
++        },
++        {
++            "req": {
++                "method": "POST",
++                "url": "{{request.origin}}/getTaskResult"
++            },
++            "res": {
++                "status": 200,
++                "body": {
++                    "errorId": 0,
++                    "taskId": "synthetic-task-id",
++                    "status": "processing"
++                }
++            }
++        },
++        {
++            "req": {
++                "method": "POST",
++                "url": "{{request.origin}}/getTaskResult"
++            },
++            "res": {
++                "status": 200,
++                "body": {
++                    "errorId": 0,
++                    "taskId": "synthetic-task-id",
++                    "status": "ready",
++                    "solution": {
++                        "gRecaptchaResponse": "synthetic-token"
++                    }
++                }
++            }
++        }
++    ]
++}
+diff --git a/connectors/capsolver/lifecycle.test.ts b/connectors/capsolver/lifecycle.test.ts
+new file mode 100644
+index 0000000..587cb4d
+--- /dev/null
++++ b/connectors/capsolver/lifecycle.test.ts
+@@ -0,0 +1,45 @@
++import { assertEquals } from "@std/assert";
++import { fromFileUrl } from "@std/path";
++import type { RunInput } from "@shared/core";
++import { loadFixture, runEndpoint, testSealedUnit } from "@shared/testing";
++
++const HERE = fromFileUrl(new URL("./", import.meta.url));
++const INPUTS = JSON.parse(
++    await Deno.readTextFile(`${HERE}test-inputs.json`),
++) as Record<string, RunInput>;
++
++Deno.test("capsolver: createTask is polled until a token is ready", async () => {
++    const result = await runEndpoint({
++        unit: await testSealedUnit("capsolver#solve/recaptcha-v2"),
++        input: INPUTS["recaptcha-v2"],
++        mode: "replay",
++        fixture: await loadFixture(
++            `${HERE}fixtures/synthetic-succeeded.json`,
++        ),
++    });
++    assertEquals(result.httpStatus, 200);
++    assertEquals(result.isProviderError, false);
++    assertEquals(result.output, {
++        errorId: 0,
++        taskId: "synthetic-task-id",
++        status: "ready",
++        solution: { gRecaptchaResponse: "synthetic-token" },
++    });
++    assertEquals(result.usage, {
++        credits: { default: 0.0008 },
++        evidence: { CALL: 1 },
++    });
++});
++
++Deno.test("capsolver: all three first-scope endpoints compile", async () => {
++    for (
++        const id of [
++            "capsolver#solve/recaptcha-v2",
++            "capsolver#solve/recaptcha-v3",
++            "capsolver#solve/turnstile",
++        ]
++    ) {
++        const unit = await testSealedUnit(id);
++        assertEquals(unit.doc.provider, "capsolver");
++    }
++});
+diff --git a/connectors/capsolver/provider.ts b/connectors/capsolver/provider.ts
+new file mode 100644
+index 0000000..51f5d1c
+--- /dev/null
++++ b/connectors/capsolver/provider.ts
+@@ -0,0 +1,156 @@
++import { defineProvider } from "@shared/core";
++
++/**
++ * CapSolver — asynchronous CAPTCHA token tasks for authorized browser
++ * automation, testing, and public-web data workflows.
++ *
++ * CapSolver authenticates in the JSON body rather than a header. The custom
++ * injector adds clientKey to both createTask and same-origin getTaskResult
++ * calls while keeping the secret outside lifecycle code and fixtures.
++ */
++export default defineProvider({
++    name: "capsolver",
++    meta: {
++        displayName: "CapSolver",
++        summary:
++            "Solve reCAPTCHA and Cloudflare Turnstile token challenges for authorized automation.",
++        description: "CAPTCHA handling for browser automation, QA, RPA, " +
++            "and public-web data workflows. Submit a supported challenge, " +
++            "poll the task to completion, and receive the provider's token " +
++            "response. This first connector scope covers proxyless " +
++            "reCAPTCHA v2, reCAPTCHA v3, and Cloudflare Turnstile tasks.",
++        homepageUrl: "https://www.capsolver.com",
++        docsUrl: "https://docs.capsolver.com/en/guide/getting-started/",
++        categories: ["captcha-solving"],
++        notes: [
++            "Use only on sites and workflows you are authorized to automate.",
++            "Tasks are retained for five minutes and may be queried at most 120 times.",
++        ],
++    },
++    auth: {
++        inject: ({ data, utils }) => ({
++            ...data.request,
++            body: utils.json.merge(data.request.body ?? {}, {
++                clientKey: data.params.apiKey,
++            }),
++        }),
++    },
++    request: {
++        baseUrl: "https://api.capsolver.com",
++        headers: { "Content-Type": "application/json" },
++    },
++    timeouts: { requestMs: 30_000, runMs: 300_000, pollMs: 3_000 },
++    lifecycle: {
++        start: async ({ utils, logger }) => {
++            const res = await utils.request();
++            if (res.status < 200 || res.status >= 300) {
++                return {
++                    kind: "COMPLETED",
++                    httpStatus: res.status,
++                    output: res.body,
++                };
++            }
++            const errorId = utils.json.optionalNum(res.body, "$.errorId");
++            if (errorId !== undefined && errorId > 0) {
++                return {
++                    kind: "COMPLETED",
++                    httpStatus: 422,
++                    providerHttpStatus: res.status,
++                    output: res.body,
++                };
++            }
++            const status = utils.json.optionalGet(res.body, "$.status");
++            if (status === "ready") {
++                return {
++                    kind: "COMPLETED",
++                    httpStatus: 200,
++                    providerHttpStatus: res.status,
++                    output: res.body,
++                };
++            }
++            const taskId = utils.json.optionalGet(res.body, "$.taskId");
++            if (typeof taskId !== "string" || taskId === "") {
++                throw Object.assign(
++                    new Error("CapSolver createTask returned no taskId"),
++                    { retriable: false },
++                );
++            }
++            logger.info("CapSolver task created", { taskId });
++            return {
++                kind: "RUNNING",
++                state: { externalRunId: taskId },
++            };
++        },
++        poll: async ({ data, utils, logger }) => {
++            const taskId = data.lifecycle.state.externalRunId;
++            if (taskId === undefined) {
++                throw Object.assign(
++                    new Error("CapSolver poll without externalRunId in state"),
++                    { retriable: false },
++                );
++            }
++            const res = await utils.http({
++                method: "POST",
++                path: "/getTaskResult",
++                body: { taskId },
++            });
++            if (res.status < 200 || res.status >= 300) {
++                return {
++                    kind: "COMPLETED",
++                    httpStatus: res.status,
++                    output: res.body,
++                };
++            }
++            const errorId = utils.json.optionalNum(res.body, "$.errorId");
++            if (errorId !== undefined && errorId > 0) {
++                return {
++                    kind: "COMPLETED",
++                    httpStatus: 422,
++                    providerHttpStatus: res.status,
++                    output: res.body,
++                };
++            }
++            const status = utils.json.optionalGet(res.body, "$.status");
++            if (status === "ready") {
++                return {
++                    kind: "COMPLETED",
++                    httpStatus: 200,
++                    providerHttpStatus: res.status,
++                    output: res.body,
++                };
++            }
++            if (status === "idle" || status === "processing") {
++                return { kind: "RUNNING" };
++            }
++            logger.warn("CapSolver task status was not recognized", {
++                taskId,
++                status: String(status),
++            });
++            return {
++                kind: "COMPLETED",
++                httpStatus: 502,
++                providerHttpStatus: res.status,
++                output: res.body,
++            };
++        },
++    },
++    output: {
++        fromError: ({ data, utils }) => {
++            const description = utils.json.optionalGet(
++                data.output,
++                "$.errorDescription",
++            );
++            const code = utils.json.optionalGet(data.output, "$.errorCode");
++            return {
++                message: typeof description === "string" && description !== ""
++                    ? description
++                    : "CapSolver API error",
++                ...(typeof code === "string" && code !== "" ? { code } : {}),
++                raw: data.output,
++            };
++        },
++    },
++    usage: {
++        credits: { default: { label: "US dollars" } },
++    },
++});
+diff --git a/connectors/capsolver/schema/common.ts b/connectors/capsolver/schema/common.ts
+new file mode 100644
+index 0000000..3b087bb
+--- /dev/null
++++ b/connectors/capsolver/schema/common.ts
+@@ -0,0 +1,10 @@
++import { z } from "zod";
++
++export const zWebsite = z.object({
++    websiteURL: z.url().describe(
++        "Full URL of the page that presents the CAPTCHA challenge.",
++    ),
++    websiteKey: z.string().min(1).describe(
++        "Public site key from the CAPTCHA widget.",
++    ),
++}).strict();
+diff --git a/connectors/capsolver/test-inputs.json b/connectors/capsolver/test-inputs.json
+new file mode 100644
+index 0000000..da7d58c
+--- /dev/null
++++ b/connectors/capsolver/test-inputs.json
+@@ -0,0 +1,22 @@
++{
++    "recaptcha-v2": {
++        "body": {
++            "websiteURL": "https://www.google.com/recaptcha/api2/demo",
++            "websiteKey": "6Le-wvkSAAAAAPBMRTvw0Q4Muexq9bi0DJwx_mJ-"
++        }
++    },
++    "recaptcha-v3": {
++        "body": {
++            "websiteURL": "https://example.com/authorized-test",
++            "websiteKey": "test-site-key",
++            "pageAction": "submit"
++        }
++    },
++    "turnstile": {
++        "body": {
++            "websiteURL": "https://example.com/authorized-test",
++            "websiteKey": "test-site-key",
++            "action": "managed"
++        }
++    }
++}
+diff --git a/connectors/categories.ts b/connectors/categories.ts
+index ad69187..db80051 100644
+--- a/connectors/categories.ts
++++ b/connectors/categories.ts
+@@ -23,6 +23,12 @@ export const LEAF_CATEGORIES = defineLeafCategories([
+         displayName: "Web Scraping",
+         description: "Fetch and extract clean content from known URLs.",
+     },
++    {
++        id: "captcha-solving",
++        displayName: "CAPTCHA Solving",
++        description:
++            "Solve supported CAPTCHA challenges for authorized automation and testing workflows.",
++    },
+     {
+         id: "news-search",
+         displayName: "News Search",
+diff --git a/connectors/ids.lock.json b/connectors/ids.lock.json
+index 4e23e32..f340c95 100644
+--- a/connectors/ids.lock.json
++++ b/connectors/ids.lock.json
+@@ -128,6 +128,9 @@
+         "bytedance#seedance-2.0-fast",
+         "bytedance#seedance-2.0-mini",
+         "bytedance#seedance-2.5",
++        "capsolver#solve/recaptcha-v2",
++        "capsolver#solve/recaptcha-v3",
++        "capsolver#solve/turnstile",
+         "clay#enrichment/company-domain",
+         "clay#enrichment/company-employee-count",
+         "clay#enrichment/company-industry",
+diff --git a/openspec/changes/add-connector-capsolver/proposal.md b/openspec/changes/add-connector-capsolver/proposal.md
+new file mode 100644
+index 0000000..d3ea869
+--- /dev/null
++++ b/openspec/changes/add-connector-capsolver/proposal.md
+@@ -0,0 +1,32 @@
++# Proposal: add-connector-capsolver
++
++## Why
++
++CapSolver provides asynchronous CAPTCHA token tasks used in authorized browser
++automation, QA, RPA, and public-web data workflows. Adding a native connector
++lets Monid users call the same core solving service exposed by CapSolver's MCP
++server without requiring Monid to host or proxy another MCP transport.
++
++## What Changes
++
++- Add a `capsolver` provider with JSON-body API-key authentication and the
++  documented `createTask` -> `getTaskResult` lifecycle.
++- Add proxyless reCAPTCHA v2, reCAPTCHA v3, and Cloudflare Turnstile endpoints.
++- Add the `captcha-solving` leaf category.
++- Model the three published standard rates in US dollars per completed task.
++
++## Capabilities
++
++- `capsolver-connector`.
++
++## Non-goals
++
++- Browser ownership, CAPTCHA detection, DOM token injection, or automatic
++  retries inside a caller's browser session.
++- Proxy-based and Enterprise task variants in the first change.
++- Calling CapSolver's MCP server from Monid; the connector uses the provider's
++  public REST API directly.
++
++## Impact
++
++New connector tree and one taxonomy leaf. No engine or schema changes.
+diff --git a/openspec/changes/add-connector-capsolver/specs/capsolver-connector/spec.md b/openspec/changes/add-connector-capsolver/specs/capsolver-connector/spec.md
+new file mode 100644
+index 0000000..311625a
+--- /dev/null
++++ b/openspec/changes/add-connector-capsolver/specs/capsolver-connector/spec.md
+@@ -0,0 +1,36 @@
++# capsolver-connector (delta)
++
++## ADDED Requirements
++
++### Requirement: CapSolver provider definition
++The provider SHALL declare name `capsolver`, JSON-body `clientKey`
++authentication, `https://api.capsolver.com` as its base URL, and the documented
++asynchronous task lifecycle. Credentials SHALL be injected by the transport and
++SHALL NOT appear in lifecycle state, logs, or fixtures.
++
++#### Scenario: An asynchronous task reaches ready
++- **WHEN** `createTask` returns a task id and `getTaskResult` progresses from
++  `processing` to `ready`
++- **THEN** the run completes with the final provider response and solution
++- **AND** the successful endpoint's per-call usage is settled once
++
++#### Scenario: The provider rejects a task
++- **WHEN** CapSolver returns a non-zero `errorId` or an HTTP error
++- **THEN** the run completes as a provider error
++- **AND** usage is zero
++
++### Requirement: Proxyless token endpoints
++The connector SHALL expose `/solve/recaptcha-v2`, `/solve/recaptcha-v3`, and
++`/solve/turnstile`. Each endpoint SHALL require `websiteURL` and `websiteKey`,
++map the caller input to the corresponding CapSolver proxyless task type, and
++use the public standard price for that task family.
++
++#### Scenario: Solve a reCAPTCHA v2 challenge
++- **WHEN** a caller submits an authorized page URL and public site key to
++  `/solve/recaptcha-v2`
++- **THEN** the wire request uses `ReCaptchaV2TaskProxyLess`
++- **AND** the API key is injected as `clientKey` outside connector code
++
++#### Scenario: Add optional Turnstile metadata
++- **WHEN** a caller provides `action` or `cdata` to `/solve/turnstile`
++- **THEN** the wire task includes a Turnstile metadata object
+diff --git a/openspec/changes/add-connector-capsolver/tasks.md b/openspec/changes/add-connector-capsolver/tasks.md
+new file mode 100644
+index 0000000..0b3fd5e
+--- /dev/null
++++ b/openspec/changes/add-connector-capsolver/tasks.md
+@@ -0,0 +1,16 @@
++# Tasks: add-connector-capsolver
++
++## 1. Connector
++
++- [x] 1.1 Add provider metadata, body authentication, error mapping, and task polling
++- [x] 1.2 Add proxyless reCAPTCHA v2, reCAPTCHA v3, and Turnstile endpoints
++- [x] 1.3 Add the `captcha-solving` leaf category and endpoint identity locks
++
++## 2. Specification and verification
++
++- [x] 2.1 Add the OpenSpec proposal and connector requirements
++- [x] 2.2 Verify the public CapSolver MCP server over stdio
++- [x] 2.3 Verify the connector with a synthetic async fixture
++- [x] 2.4 Reach the live CapSolver API through the compiled connector with an invalid-key smoke test
++- [x] 2.5 Run formatting, connector type checks, compilation, and connector tests
++- [ ] 2.6 Record one authorized live solve after a test API key is provided
+diff --git a/review-materials/how-to-add-captcha-solving-to-ai-agents-with-monid.md b/review-materials/how-to-add-captcha-solving-to-ai-agents-with-monid.md
+new file mode 100644
+index 0000000..567a735
+--- /dev/null
++++ b/review-materials/how-to-add-captcha-solving-to-ai-agents-with-monid.md
+@@ -0,0 +1,201 @@
++### TL;DR
++
++- Monid can expose a native CAPTCHA-solving connector through the same `discover`, `inspect`, and `run` flow that its agents use for other API tools.
++- The proposed first release covers proxyless reCAPTCHA v2, reCAPTCHA v3, and Cloudflare Turnstile tasks for authorized automation workflows.
++- The connector keeps the CapSolver API key inside Monid's credential injection layer instead of placing it in agent prompts, fixtures, or lifecycle state.
++- A local prototype already compiles into the Monid catalog and passes the asynchronous `createTask → processing → ready` lifecycle test.
++- The hosted Monid catalog does not include this connector yet. The code and commands below describe the tested implementation and intended user flow pending upstream review.
++
++## Why AI Agents Need a CAPTCHA Tool in Monid
++
++Browser agents can navigate pages and call web-data tools, but a CAPTCHA checkpoint creates a separate technical step. The agent must identify the challenge type, submit the correct page URL and public site key, wait for a result, and apply the returned token to the authorized browser session. Without a dedicated tool, every agent framework has to implement that lifecycle independently.
++
++The proposed integration adds [CapSolver](https://www.capsolver.com/?utm_source=offcial&utm_medium=blog&utm_campaign=how-to-add-captcha-solving-to-ai-agents-with-monid) as a native Monid provider. Monid remains the tool-discovery and execution layer, while CapSolver handles supported CAPTCHA tasks through its documented API. This approach fits Monid's existing model: an agent discovers a tool, inspects its schema and pricing, and starts a structured run through one interface. Monid documents that flow in its <a href="https://docs.monid.ai/" rel="nofollow">official introduction</a>.
++
++## What the Monid and CapSolver Integration Enables
++
++The native connector gives an AI agent a structured way to request CAPTCHA solving without embedding provider-specific HTTP logic in every workflow.
++
++The first connector scope contains three endpoints:
++
++| Monid endpoint | CapSolver task type | Intended use |
++| --- | --- | --- |
++| `capsolver#solve/recaptcha-v2` | `ReCaptchaV2TaskProxyLess` | Standard and invisible reCAPTCHA v2 token tasks |
++| `capsolver#solve/recaptcha-v3` | `ReCaptchaV3TaskProxyLess` | Score-based reCAPTCHA v3 token tasks with an action |
++| `capsolver#solve/turnstile` | `AntiTurnstileTaskProxyLess` | Cloudflare Turnstile token tasks |
++
++This small initial scope keeps the connector easy to review. Enterprise task types, proxy-based tasks, and browser-side token application can be added separately after the core API lifecycle is stable.
++
++The integration is designed for QA, RPA, browser automation, and permitted public-web data workflows. Technical capability does not grant permission to access private, restricted, or sensitive data. Review the target site's terms and obtain authorization before automating it.
++
++## How the Native Connector Works
++
++The native connector wraps CapSolver's asynchronous task API in Monid's standard provider lifecycle.
++
++1. The agent discovers or selects a CapSolver endpoint.
++2. Monid validates `websiteURL`, `websiteKey`, and any task-specific input.
++3. Monid injects the protected `clientKey` into the JSON request body.
++4. The connector calls `/createTask` and stores only the returned task ID.
++5. Monid polls `/getTaskResult` while the task is `idle` or `processing`.
++6. When the task becomes `ready`, the connector returns the provider's structured solution.
++
++This is intentionally a native REST connector rather than an MCP-to-MCP bridge. Monid already exposes its own <a href="https://docs.monid.ai/guide/quickstart-mcp.html" rel="nofollow">MCP interface for AI clients</a>; the provider layer underneath it calls CapSolver's API directly.
++
++```text
++AI agent
++  → Monid discover / inspect / run
++  → CapSolver connector
++  → createTask
++  → getTaskResult polling
++  → structured solution
++  → authorized browser workflow continues
++```
++
++> ### **Redeem Your CapSolver Bonus Code**
++>
++>Boost your automation budget instantly!
++Use bonus code **CAP26** when topping up your CapSolver account to get an extra **5% bonus** on every recharge — with no limits.
++Redeem it now in your [CapSolver Dashboard](https://dashboard.capsolver.com/dashboard/overview/?utm_source=offcial&utm_medium=blog&utm_campaign=how-to-add-captcha-solving-to-ai-agents-with-monid)
++> ![Bonus Code](https://assets.capsolver.com/prod/posts/cloudflare-blocking-your-ai-agent-solution/uyhK7mNTRCcA-22664fd10ef4221d9ca40218ca5b7863.png)
++> 
++
++## Configure CapSolver as a Monid Provider
++
++CapSolver authentication differs from providers that use an HTTP authorization header. The API expects `clientKey` in the JSON body, so the connector adds it inside Monid's credential injection layer.
++
++The tested provider definition uses this pattern:
++
++```typescript
++export default defineProvider({
++  name: "capsolver",
++  auth: {
++    inject: ({ data, utils }) => ({
++      ...data.request,
++      body: utils.json.merge(data.request.body ?? {}, {
++        clientKey: data.params.apiKey,
++      }),
++    }),
++  },
++  request: {
++    baseUrl: "https://api.capsolver.com",
++    headers: { "Content-Type": "application/json" },
++  },
++  timeouts: { requestMs: 30_000, runMs: 300_000, pollMs: 3_000 },
++});
++```
++
++The secret stays out of the endpoint definition, replay fixtures, logs, and lifecycle state. Only the transport layer receives the credential when it sends the provider request.
++
++You can review the current CapSolver task lifecycle in the official [`createTask`](https://docs.capsolver.com/en/guide/api-createtask/) and [`getTaskResult`](https://docs.capsolver.com/en/guide/api-gettaskresult/) documentation.
++
++## Define a reCAPTCHA v2 Endpoint
++
++Each Monid endpoint maps a validated input schema to one CapSolver task type. The reCAPTCHA v2 endpoint accepts a page URL, public site key, and optional fields for invisible widgets or page actions.
++
++```typescript
++const zBody = z.object({
++  websiteURL: z.url(),
++  websiteKey: z.string().min(1),
++  isInvisible: z.boolean().optional(),
++  pageAction: z.string().min(1).optional(),
++}).strict();
++
++export default defineEndpoint({
++  endpoint: "/solve/recaptcha-v2",
++  request: { method: "POST", path: "/createTask" },
++  input: {
++    schema: { body: zBody },
++    toRequest: ({ data, utils }) => ({
++      ...data.input,
++      body: {
++        task: utils.json.merge(data.input.body ?? {}, {
++          type: "ReCaptchaV2TaskProxyLess",
++        }),
++      },
++    }),
++  },
++});
++```
++
++The same structure applies to reCAPTCHA v3 and Turnstile, with task-specific schemas and task types. Monid's <a href="https://github.com/monid-ai/monid#writing-a-connector" rel="nofollow">connector authoring guide</a> requires replay fixtures, type checks, and a pull request before a provider is added to the hosted catalog.
++
++## Handle the Asynchronous Result
++
++The connector must treat CapSolver as an asynchronous provider. A successful `/createTask` response normally supplies a task ID, while `/getTaskResult` reports `idle`, `processing`, or `ready`.
++
++The tested lifecycle follows these rules:
++
++- `idle` or `processing`: keep the Monid run active and poll again.
++- `ready`: return the structured solution and complete the run.
++- non-zero `errorId`: return a provider error rather than a successful result.
++- non-2xx HTTP response: preserve the provider response and record zero completed usage.
++- missing task ID or an unknown status: stop with a clear connector error.
++
++This separation matters because Monid distinguishes its own run status from the upstream provider's HTTP status. Its <a href="https://docs.monid.ai/cli/run.html" rel="nofollow">CLI run documentation</a> explains how asynchronous tools start a run and expose the final provider response.
++
++## Inspect and Run the Connector After Publication
++
++Once the connector is accepted into Monid's hosted catalog, users should inspect the published schema before sending a task. The exact command remains pending upstream publication, but the intended CLI flow is:
++
++```bash
++monid inspect -p capsolver -e /solve/recaptcha-v2
++
++monid run -p capsolver -e /solve/recaptcha-v2 \
++  -i '{"websiteURL":"https://authorized.example/test","websiteKey":"PUBLIC_SITE_KEY"}' \
++  --wait
++```
++
++Use an authorized test page and replace `PUBLIC_SITE_KEY` with the widget's public site key. Keep API credentials in Monid's credential configuration rather than placing them in commands, prompts, or source files.
++
++At the time of writing, these commands are a publication target, not a claim that the hosted endpoint is already available. The local prototype has passed connector compilation, catalog generation, and the synthetic `createTask → processing → ready` lifecycle test. A live paid task on an authorized demo page and Monid's upstream review remain prerequisites for general availability.
++
++For direct agent integrations available today, the [CapSolver MCP Server](https://www.capsolver.com/agent-automation/mcp) exposes CAPTCHA tools to compatible clients. The broader [agentic browser integration guide](https://www.capsolver.com/blog/ai/agentic-browser-capsolver) explains where CAPTCHA handling belongs in a browser-agent workflow.
++
++## Implementation Limits and Next Steps
++
++The first connector should stay narrow until the basic lifecycle is accepted and observed in real workloads.
++
++- It does not automatically detect a CAPTCHA in browser DOM content.
++- It does not apply a returned token to an active Playwright or Puppeteer page.
++- It does not include Enterprise or proxy-based CapSolver task types.
++- It requires the calling workflow to provide the correct URL, public site key, and task-specific fields.
++- It should not be used for unauthorized access, account abuse, or collection of private or sensitive information.
++
++After upstream review, the next useful addition is a verified browser example showing how an agent detects a supported widget, calls the Monid endpoint, and applies the result to the same authorized session. That example should be tested against an explicit demo environment rather than a third-party production site.
++
++## Conclusion
++
++A native Monid connector is the cleanest way to make CAPTCHA solving discoverable to AI agents without adding provider-specific code to every agent framework. The local prototype demonstrates that Monid can validate task input, protect the API key, manage asynchronous polling, and return a structured result through its normal tool lifecycle.
++
++The remaining work is procedural and verification-focused: confirm the category with Monid, complete one authorized live test, submit the connector for review, and publish reproducible commands only after the endpoint appears in the hosted catalog. Teams that need direct access before then can integrate through the official [CapSolver](https://www.capsolver.com/?utm_source=offcial&utm_medium=blog&utm_campaign=how-to-add-captcha-solving-to-ai-agents-with-monid) API or MCP Server.
++
++## Build Reliable Automation Workflows with CapSolver
++
++Create an account from the [CapSolver Dashboard](https://dashboard.capsolver.com/dashboard/overview/?utm_source=offcial&utm_medium=blog&utm_campaign=how-to-add-captcha-solving-to-ai-agents-with-monid), review the [supported integration documentation](https://docs.capsolver.com/en/), and test only on pages you are permitted to automate. For product and account questions, consult the [CapSolver FAQ](https://www.capsolver.com/faq).
++
++## FAQ
++
++**Q: Is the CapSolver connector already available in Monid?**
++
++No. The native connector is currently a tested local prototype awaiting Monid's category confirmation, upstream review, and catalog publication.
++
++**Q: Does Monid call the CapSolver MCP Server directly?**
++
++No. Monid should call CapSolver's REST API through a native provider connector, while Monid's own MCP server exposes the resulting tools to compatible AI clients.
++
++**Q: Which CAPTCHA types are included in the proposed first release?**
++
++The proposed first release covers proxyless reCAPTCHA v2, reCAPTCHA v3, and Cloudflare Turnstile token tasks.
++
++**Q: Where is the CapSolver API key stored?**
++
++The connector passes the API key through Monid's credential injection layer and adds it to the provider request body only when the request is sent.
++
++**Q: Can the connector automatically control a browser page?**
++
++No. The initial connector returns a structured solution; the authorized browser workflow remains responsible for applying that result to its active page or session.
++
++**Q: Can the integration be used on any website?**
++
++No. Use the integration only on sites and workflows you are authorized to automate, and follow applicable terms, privacy requirements, and laws.
++
+-- 
+2.50.1 (Apple Git-155)
+
